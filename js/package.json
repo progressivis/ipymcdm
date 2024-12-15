@@ -1,0 +1,31 @@
+{
+  "name": "ipymcdm",
+  "version": "0.0.1",
+  "description": "Jupyter widget for rendering Multiclass Density Maps using WebGPU",
+  "author": "Frédéric Vernier & Jean-Daniel Fekete",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/progressivis/ipymcdm.git"
+  },
+  "license": "BSD-2-Clause",
+  "scripts": {
+    "clean": "rm ../ipymcdm/bundle.js",
+    "prepare": "npm run lint && npm run build",
+    "build": "esbuild --bundle --format=esm --outfile=../ipymcdm/bundle.js src/index.js",
+    "lint": "jshint src",
+    "watch": "npm run build -- --watch",
+    "test": "npm run lint"
+  },
+  "dependencies": {
+    "@jupyter-widgets/base": "^1.1 || ^2 || ^3 || ^4 || ^5 || ^6",
+    "densitymaps": "file:../../DensityMaps",
+    "pub-sub-es": "~3.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "jshint": "*"
+  },
+  "jshintConfig": {
+    "esversion": 8
+  }
+}
