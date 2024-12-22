@@ -2,7 +2,7 @@ import importlib.metadata
 import pathlib
 
 import anywidget
-from traitlets import Int, Float, Enum
+from traitlets import Int, Float, Enum, validate, TraitError
 from traittypes import Array
 import lz4.frame
 import numpy as np
@@ -15,7 +15,7 @@ except importlib.metadata.PackageNotFoundError:
 
 # Code extracted from maartenbreddels ipyvolume
 def array_to_binary(ar, obj=None, force_contiguous=True):
-    print(f"Serializing array {ar}")
+    # print(f"Serializing array {ar}")
     if ar is None:
         return None
     if ar.dtype.kind not in ['u', 'i', 'f']:  # ints and floats
@@ -31,7 +31,7 @@ def array_to_binary(ar, obj=None, force_contiguous=True):
         'dtype': str(ar.dtype),
         'shape': ar.shape
     }
-    print(json)
+    # print(json)
     return json
 
 
@@ -50,7 +50,38 @@ class MCDMWidget(anywidget.AnyWidget):
         sync=True,
         **ndarray_serialization
     )
+    zoom   = Float(1).tag(sync=True)
     minval = Float(0).tag(sync=True)
     maxval = Float(default_value=1).tag(sync=True)
     radius = Int(default_value=4).tag(sync=True)
     blurtype = Enum(('', 'h', 'v', 'both'), default_value='').tag(sync=True)
+
+    @validate('array')
+    def _check_array(self, proposal):
+        newarray = proposal['value']
+        if self.array is None:
+            return newarray
+        if newarray.shape != self.array.shape:
+            raise TraitError(f'Cannot change the array shape {self.array.shape}')
+        return newarray
+    
+    @validate('zoom')
+    def _check_zoom(self, proposal):
+        newzoom = proposal['value']
+        if newzoom <= 0:
+            raise TraitError('Zoom should be positive')
+        return newzoom
+
+    @validate('minval')
+    def _check_minval(self, proposal):
+        newval = proposal['value']
+        if newval >= self.maxval:
+            raise TraitError('minval < maxval')
+        return newval
+    
+    @validate('maxval')
+    def _check_maxval(self, proposal):
+        newval = proposal['value']
+        if newval <= self.minval:
+            raise TraitError('minval < maxval')
+        return newval

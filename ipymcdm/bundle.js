@@ -5945,7 +5945,9 @@ var require_densityMaps = __commonJS({
                 this.params.ma = 8;
               }
               static async load(dataSource, containerid = "contforvis", zoom = 1, tagid = null) {
-                let container = document.getElementById(containerid);
+                let container = containerid;
+                if (typeof container == "string")
+                  container = document.getElementById(containerid);
                 let newobj = new DensityMaps();
                 if (typeof dataSource == "string") {
                   const response = await fetch("/p?dataname=" + dataSource, {
@@ -5969,7 +5971,7 @@ var require_densityMaps = __commonJS({
                   newobj.#img = dataSource;
                 }
                 let id = tagid == null ? "" : `id="${tagid}"`;
-                container.innerHTML = "<canvas " + id + ' width="' + dataSource.width * zoom + '" height="' + dataSource.height * zoom + '"></canvas>';
+                container.innerHTML = `<canvas ${id} width="${Math.trunc(dataSource.width * zoom)}" height="${Math.trunc(dataSource.height * zoom)}"></canvas>`;
                 newobj.canvas = container.firstChild;
                 newobj.#adapter = await navigator.gpu.requestAdapter();
                 if (!newobj.#adapter) {
@@ -5978,6 +5980,20 @@ var require_densityMaps = __commonJS({
                 newobj.#device = await newobj.#adapter.requestDevice();
                 newobj.init();
                 return newobj;
+              }
+              setDataSource(dataSource) {
+                if (typeof dataSource != "object")
+                  throw new Error(`Invalid data source ${dataSource}`);
+                if (dataSource.data.length != dataSource.width * dataSource.height)
+                  throw new Error(
+                    `Inconsistent data source length ${dataSource.data.length} != ${dataSource.width * dataSource.height}`
+                  );
+                if (dataSource.data.length != this.#img.data.length)
+                  throw new Error(
+                    `Invalid data source size (${dataSource.data.width}, ${dataSource.data.height}) != (${this.#img.data.width},${this.#img.data.height})`
+                  );
+                this.#img = dataSource;
+                this.reset();
               }
               init() {
                 if (!this.#img) return;
@@ -6898,31 +6914,40 @@ function decompress(data) {
     data: array
   };
 }
+function updateUI(model, datamap) {
+  datamap.params.mi = model.get("minval");
+  datamap.params.ma = model.get("maxval");
+  datamap.params.blurtype = model.get("blurtype");
+  datamap.params.radius = model.get("radius");
+}
 async function render({ model, el }) {
   let span = document.createElement("span");
+  let densitymap = null;
   let randomStr = "mcdm-" + Math.random().toString(36).substring(2, 5) + Math.random().toString(36).substring(2, 5);
   span.id = randomStr;
   console.log("hello from mcmd");
   el.classList.add("ipymcdm");
   el.appendChild(span);
-  let array = model.get("array");
-  let dataSource = decompress(array);
-  if (dataSource != null) {
-    (0, import_densitymaps.load)(dataSource, randomStr, 1).then((datamap) => {
-      datamap.render();
-    });
-  }
-  function on_data_change() {
+  async function on_data_change() {
     console.log("hello from on_data_change in mcmd");
-    let array2 = model.get("array");
-    let dataSource2 = decompress(array2);
-    if (dataSource2 != null) {
-      (0, import_densitymaps.load)(dataSource2, randomStr, 1).then((datamap) => {
-        datamap.render();
-      });
+    const zoom = model.get("zoom");
+    const array = model.get("array");
+    const dataSource = decompress(array);
+    if (dataSource != null) {
+      if (densitymap == null) {
+        console.log("Creating density map");
+        densitymap = await (0, import_densitymaps.load)(dataSource, span, model.get("zoom"));
+        updateUI(model, densitymap);
+        densitymap.render();
+      } else {
+        console.log("Updating density map");
+        updateUI(model, densitymap);
+        densitymap.setDataSource(dataSource);
+      }
     }
   }
   model.on("change:array", on_data_change);
+  await on_data_change();
 }
 var src_default = { render };
 export {

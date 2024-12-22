@@ -40,15 +40,26 @@ function decompress(data) {
 }
 
 function initialize({ model }) {
-    // Set up shared state or event handlers.
+
     return () => {
       // Optional: Called when the widget is destroyed.
     } ;
   }
 
+function updateUI(model, datamap) {
+  datamap.params.mi = model.get('minval');
+  datamap.params.ma = model.get('maxval');
+
+  datamap.params.blurtype = model.get('blurtype');
+  datamap.params.radius = model.get('radius');
+  // datamap.params.colorscale = ...
+}
+
+
 /** @type {import("npm:@anywidget/types").Render<Model>} */
 async function render({ model, el }) {
   let span = document.createElement("span");
+  let densitymap = null;
   let randomStr =
     "mcdm-" +
     Math.random().toString(36).substring(2, 5) +
@@ -57,24 +68,27 @@ async function render({ model, el }) {
   console.log('hello from mcmd');
   el.classList.add("ipymcdm");
   el.appendChild(span);
-  let array = model.get('array');
-  let dataSource = decompress(array);
-  if (dataSource != null) {
-    load(dataSource, randomStr, 1).then((datamap) => {
-      datamap.render();
-    });
-  }
-  function on_data_change() {
+  async function on_data_change() {
     console.log('hello from on_data_change in mcmd');
-    let array = model.get("array");
-    let dataSource = decompress(array);
+    const zoom = model.get('zoom');
+    const array = model.get("array");
+    const dataSource = decompress(array);
     if (dataSource != null) {
-      load(dataSource, randomStr, 1).then((datamap) => {
-        datamap.render();
-      });
+      if (densitymap == null) {
+        console.log("Creating density map");
+        densitymap = await load(dataSource, span, model.get('zoom'));
+        updateUI(model, densitymap);
+        densitymap.render();
+      }
+      else {
+        console.log("Updating density map");
+        updateUI(model, densitymap);
+        densitymap.setDataSource(dataSource);
+      }
     }
   }
   model.on("change:array", on_data_change);
+  await on_data_change();
 }
 
 export default { render };
