@@ -14,15 +14,15 @@ const dtypeToArray = {
 
 
 function decompress(data) {
-  console.log(`Deserializing ${data}`);
+  // console.log(`Deserializing ${data}`);
   if (data == null) {
-    console.log("Data is null");
+    // console.log("Data is null");
     return null;
   }
   let dtype = data.dtype;
   let jstype = dtypeToArray[dtype];
   if (! jstype) {
-    console.log("Data dtype is unknown");
+    // console.log("Data dtype is unknown");
     return null; // invalid data type
   }
   let shape = data.shape;
@@ -69,7 +69,7 @@ async function render({ model, el }) {
   el.classList.add("ipymcdm");
   el.appendChild(span);
   async function on_data_change() {
-    console.log('hello from on_data_change in mcmd');
+    // console.log('hello from on_data_change in mcmd');
     const zoom = model.get('zoom');
     const array = model.get("array");
     const dataSource = decompress(array);
@@ -81,13 +81,22 @@ async function render({ model, el }) {
         densitymap.render();
       }
       else {
-        console.log("Updating density map");
+        // console.log("Updating density map");
         updateUI(model, densitymap);
         densitymap.setDataSource(dataSource);
       }
     }
   }
   model.on("change:array", on_data_change);
+  async function on_param_change() {
+    // console.log('hello from on_param_change in mcmd');
+    if (densitymap == null) return;
+    updateUI(model, densitymap);
+    densitymap.render();
+  }
+  for (let prop in ['minval', 'maxval']) {
+    model.on(`change:${prop}`, on_param_change);
+  }
   await on_data_change();
 }
 
