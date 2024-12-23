@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../DensityMaps/dist/densityMaps.js
+// node_modules/densitymaps/dist/densityMaps.js
 var require_densityMaps = __commonJS({
-  "../../DensityMaps/dist/densityMaps.js"(exports, module) {
+  "node_modules/densitymaps/dist/densityMaps.js"(exports, module) {
     (function webpackUniversalModuleDefinition(root, factory) {
       if (typeof exports === "object" && typeof module === "object")
         module.exports = factory();
@@ -6952,11 +6952,15 @@ async function render({ model, el }) {
   }
   await on_data_change();
 }
-var src_default = { render };
+var index_default = { render };
 export {
-  src_default as default
+  index_default as default
 };
-/*! pako 2.1.0 https://github.com/nodeca/pako @license (MIT AND Zlib) */
-/*!**************************!*\
-  !*** ./client/client.js ***!
-  \**************************/
+/*! Bundled license information:
+
+densitymaps/dist/densityMaps.js:
+  (*! pako 2.1.0 https://github.com/nodeca/pako @license (MIT AND Zlib) *)
+  (*!**************************!*\
+    !*** ./client/client.js ***!
+    \**************************)
+*/
