@@ -5794,7 +5794,12 @@ var require_densityMaps = __commonJS({
             __webpack_require__.r(__webpack_exports__);
             __webpack_require__.d(__webpack_exports__, {
               /* harmony export */
-              DensityMaps: () => (
+              debug: () => (
+                /* binding */
+                debug
+              ),
+              /* harmony export */
+              "default": () => (
                 /* binding */
                 DensityMaps
               ),
@@ -5812,23 +5817,33 @@ var require_densityMaps = __commonJS({
             async function load2(dataSource, containerid = "contforvis", zoom = 1, tagid = null) {
               return DensityMaps.load(dataSource, containerid, zoom, tagid);
             }
+            async function debug() {
+              return DensityMaps.debug();
+            }
             class DensityMaps {
               #hBlurPipeline;
               #vBlurPipeline;
+              #texurl = "";
               #device = null;
               #adapter = null;
-              #bindGroups = null;
+              #bindGroupsRender = null;
+              #bindGroupsData = null;
+              #bindGroupLayoutData = null;
+              #bindGroupLayoutRender = null;
+              #uniformGridBuffer = null;
               #step = 0;
               // Track how many 
               #GRID_SIZE_X;
               #GRID_SIZE_Y;
               #WORKGROUP_SIZE = 8;
               #context;
-              #cellPipeline;
+              #renderPipeline;
               #vertexBuffer;
               #vertices;
               #cellStateArray;
               #cellStateStorage;
+              #texture;
+              #sampler;
               #uniformAdjustBuffer;
               #uniformBlurBuffer;
               #img;
@@ -5837,13 +5852,52 @@ var require_densityMaps = __commonJS({
               canvas;
               params = {
                 mi: 0,
-                ma: 8,
+                ma: 16,
                 radius: 4,
                 blurtype: "",
                 colorscale: ""
               };
               constructor() {
                 this.#gk = DensityMaps.makeGaussKernel(this.params.radius);
+              }
+              static async loadImageBitmap(url) {
+                var img;
+                if (url == "") {
+                  const size = 256;
+                  const data = new Uint8ClampedArray(4 * size);
+                  for (let i = 0; i < size * 4; i += 4) {
+                    data[i + 0] = i;
+                    data[i + 1] = i;
+                    data[i + 2] = i;
+                    data[i + 3] = 255;
+                  }
+                  img = new ImageData(data, size);
+                } else {
+                  const res = await fetch(url);
+                  img = await res.blob();
+                }
+                return await createImageBitmap(img, { colorSpaceConversion: "none" });
+              }
+              async applyColorScale(url) {
+                this.#texurl = url;
+                const source = await DensityMaps.loadImageBitmap(url);
+                const texture = this.#device.createTexture({
+                  label: url,
+                  format: "rgba8unorm",
+                  size: [source.width, source.height],
+                  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+                });
+                this.#device.queue.copyExternalImageToTexture(
+                  { source, flipY: true },
+                  { texture },
+                  { width: source.width, height: source.height }
+                );
+                this.#sampler = this.#device.createSampler({
+                  minFilter: "linear"
+                });
+                this.#texture = texture;
+                this.updateRenderBindGroup();
+                this.render();
               }
               static makeGaussKernel(sigma) {
                 if (sigma == 0)
@@ -5864,8 +5918,8 @@ var require_densityMaps = __commonJS({
                 }
                 return kernel;
               }
-              async debug() {
-                let gk = DensityMaps.makeGaussKernel(DensityMaps.params.radius);
+              static async debug() {
+                let gk = DensityMaps.makeGaussKernel(8);
                 let kt = "** ";
                 for (let v of gk)
                   kt = kt + v + " ";
@@ -5941,16 +5995,30 @@ var require_densityMaps = __commonJS({
                   ])
                 }, "contid", 4);
                 dm.render();
-                this.params.mi = 1;
-                this.params.ma = 8;
+                dm.params.mi = 1;
+                dm.params.ma = 8;
               }
               static async load(dataSource, containerid = "contforvis", zoom = 1, tagid = null) {
                 let container = containerid;
                 if (typeof container == "string")
                   container = document.getElementById(containerid);
                 let newobj = new DensityMaps();
-                if (typeof dataSource == "string") {
-                  const response = await fetch("/p?dataname=" + dataSource, {
+                if (typeof dataSource == "string" && dataSource.startsWith("server://")) {
+                  const response = await fetch("/p?dataname=" + dataSource.substring(9), {
+                    method: "GET",
+                    headers: {
+                      /* Accept: 'image/png',*/
+                      "Content-Type": "application/octet-stream"
+                    },
+                    responseType: "arraybuffer"
+                  });
+                  if (!response.ok)
+                    throw new Error(`Response status: ${response.status}`);
+                  const data = await response.arrayBuffer();
+                  newobj.#img = (0, fast_png__WEBPACK_IMPORTED_MODULE_0__.decode)(data);
+                  dataSource = newobj.#img;
+                } else if (typeof dataSource == "string") {
+                  const response = await fetch(dataSource, {
                     method: "GET",
                     headers: {
                       /* Accept: 'image/png',*/
@@ -5978,7 +6046,7 @@ var require_densityMaps = __commonJS({
                   throw new Error("WebGPU not supported on this browser.");
                 }
                 newobj.#device = await newobj.#adapter.requestDevice();
-                newobj.init();
+                await newobj.init();
                 return newobj;
               }
               setDataSource(dataSource) {
@@ -5995,7 +6063,7 @@ var require_densityMaps = __commonJS({
                 this.#img = dataSource;
                 this.reset();
               }
-              init() {
+              async init() {
                 if (!this.#img) return;
                 this.#GRID_SIZE_X = this.#img.width;
                 this.#GRID_SIZE_Y = this.#img.height;
@@ -6028,6 +6096,7 @@ var require_densityMaps = __commonJS({
                   size: this.#vertices.byteLength,
                   usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
                 });
+                await this.applyColorScale("");
                 this.#device.queue.writeBuffer(
                   this.#vertexBuffer,
                   /*bufferOffset=*/
@@ -6044,12 +6113,12 @@ var require_densityMaps = __commonJS({
                   }]
                 };
                 const uniformGridArray = new Float32Array([this.#GRID_SIZE_X, this.#GRID_SIZE_Y]);
-                const uniformGridBuffer = this.#device.createBuffer({
+                this.#uniformGridBuffer = this.#device.createBuffer({
                   label: "Grid Uniforms",
                   size: uniformGridArray.byteLength,
                   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
                 });
-                this.#device.queue.writeBuffer(uniformGridBuffer, 0, uniformGridArray);
+                this.#device.queue.writeBuffer(this.#uniformGridBuffer, 0, uniformGridArray);
                 const uniformBlurArray = new Float32Array(this.#gk);
                 this.#uniformBlurBuffer = this.#device.createBuffer({
                   label: "Blur Uniforms",
@@ -6095,8 +6164,9 @@ var require_densityMaps = __commonJS({
 
         @group(0) @binding(0) var<uniform> grid: vec2f;
         @group(0) @binding(1) var<storage> cellState: array<u32>; 
-        @group(0) @binding(4) var<uniform> globAdjust: vec2f;
-
+        @group(0) @binding(2) var<uniform> globAdjust: vec2f;
+        @group(0) @binding(3) var ourTexture: texture_2d<f32>;  // 
+        @group(0) @binding(4) var ourSampler: sampler;
 
         @vertex
         fn vertexMain(input: VertexInput) -> VertexOutput  {
@@ -6122,52 +6192,76 @@ var require_densityMaps = __commonJS({
         @fragment
         fn fragmentMain(input: FragInput) -> @location(0) vec4f {
           let bb1 = 1-max(input.cell.x/grid.x, input.cell.y/grid.y);
-          let bb2 = sqrt(max(0.0,f32(input.val)-globAdjust[0]))/(globAdjust[1]-globAdjust[0]); 
+          let bb2 = (max(0.0,f32(input.val)-globAdjust[0]))/(globAdjust[1]-globAdjust[0]); 
           if (f32(input.val)<globAdjust[0]){
             return vec4f(0.0, 0.0, 0.0, 0.0);
+            //return textureSampleLevel(ourTexture, ourSampler, vec2f(0.1, 0.1),0.0 );
           } else {
-            return vec4f(bb2, bb2, bb2, 1.0);//input.cell/grid
+            //return vec4f(bb2, bb2, bb2, 1.0);//input.cell/grid
+            return textureSampleLevel(ourTexture, ourSampler, vec2f(bb2, 0.5), 0.0);
           }
         }
 
       `
                 });
-                const bindGroupLayout = this.#device.createBindGroupLayout({
-                  label: "Cell Bind Group Layout",
+                this.#bindGroupLayoutData = this.#device.createBindGroupLayout({
+                  label: "Data Bind Group Layout",
                   entries: [{
                     binding: 0,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT,
+                    visibility: GPUShaderStage.COMPUTE,
                     buffer: {}
                     // Grid uniform buffer
                   }, {
                     binding: 1,
-                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT,
+                    visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "read-only-storage" }
-                    // Cell state input buffer
+                    // data input buffer
                   }, {
                     binding: 2,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "storage" }
-                    // Cell state output buffer
+                    // data output buffer
                   }, {
                     binding: 3,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "read-only-storage" }
-                    // blur buffer
+                    // data processing params buffer
+                  }]
+                });
+                this.#bindGroupLayoutRender = this.#device.createBindGroupLayout({
+                  label: "Cell Bind Group Layout",
+                  entries: [{
+                    binding: 0,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    buffer: {}
+                    // Grid uniform buffer
                   }, {
-                    binding: 4,
+                    binding: 1,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" }
+                    // Cell state input buffer
+                  }, {
+                    binding: 2,
                     visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
                     buffer: {}
                     // color adjustement uniform buffer
+                  }, {
+                    binding: 3,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    texture: {}
+                  }, {
+                    binding: 4,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    sampler: {}
                   }]
                 });
-                const pipelineLayout = this.#device.createPipelineLayout({
-                  label: "Cell Pipeline Layout",
-                  bindGroupLayouts: [bindGroupLayout]
+                const renderPipelineLayout = this.#device.createPipelineLayout({
+                  label: "render Pipeline Layout",
+                  bindGroupLayouts: [this.#bindGroupLayoutRender]
                 });
-                this.#cellPipeline = this.#device.createRenderPipeline({
-                  label: "Cell pipeline",
-                  layout: pipelineLayout,
+                this.#renderPipeline = this.#device.createRenderPipeline({
+                  label: "render pipeline",
+                  layout: renderPipelineLayout,
                   vertex: {
                     module: cellShaderModule,
                     entryPoint: "vertexMain",
@@ -6181,48 +6275,12 @@ var require_densityMaps = __commonJS({
                     }]
                   }
                 });
-                this.#bindGroups = [
-                  this.#device.createBindGroup({
-                    label: "Cell renderer bind group A",
-                    layout: bindGroupLayout,
-                    entries: [{
-                      binding: 0,
-                      resource: { buffer: uniformGridBuffer }
-                    }, {
-                      binding: 1,
-                      resource: { buffer: this.#cellStateStorage[0] }
-                    }, {
-                      binding: 2,
-                      resource: { buffer: this.#cellStateStorage[1] }
-                    }, {
-                      binding: 3,
-                      resource: { buffer: this.#uniformBlurBuffer }
-                    }, {
-                      binding: 4,
-                      resource: { buffer: this.#uniformAdjustBuffer }
-                    }]
-                  }),
-                  this.#device.createBindGroup({
-                    label: "Cell renderer bind group B",
-                    layout: bindGroupLayout,
-                    entries: [{
-                      binding: 0,
-                      resource: { buffer: uniformGridBuffer }
-                    }, {
-                      binding: 1,
-                      resource: { buffer: this.#cellStateStorage[1] }
-                    }, {
-                      binding: 2,
-                      resource: { buffer: this.#cellStateStorage[0] }
-                    }, {
-                      binding: 3,
-                      resource: { buffer: this.#uniformBlurBuffer }
-                    }, {
-                      binding: 4,
-                      resource: { buffer: this.#uniformAdjustBuffer }
-                    }]
-                  })
-                ];
+                const dataPipelineLayout = this.#device.createPipelineLayout({
+                  label: "data Pipeline Layout",
+                  bindGroupLayouts: [this.#bindGroupLayoutData]
+                });
+                this.updateDataBindGroup();
+                this.updateRenderBindGroup();
                 const hBlurShaderModule = this.#device.createShaderModule({
                   label: "horizontal blur",
                   code: `
@@ -6310,7 +6368,7 @@ var require_densityMaps = __commonJS({
                 });
                 this.#hBlurPipeline = this.#device.createComputePipeline({
                   label: "hBlur pipeline",
-                  layout: pipelineLayout,
+                  layout: dataPipelineLayout,
                   compute: {
                     module: hBlurShaderModule,
                     entryPoint: "computeMain"
@@ -6318,29 +6376,109 @@ var require_densityMaps = __commonJS({
                 });
                 this.#vBlurPipeline = this.#device.createComputePipeline({
                   label: "vBlur pipeline",
-                  layout: pipelineLayout,
+                  layout: dataPipelineLayout,
                   compute: {
                     module: vBlurShaderModule,
                     entryPoint: "computeMain"
                   }
                 });
-                const encoder = this.#device.createCommandEncoder();
-                const pass = encoder.beginRenderPass({
-                  colorAttachments: [{
-                    view: this.#context.getCurrentTexture().createView(),
-                    loadOp: "clear",
-                    clearValue: { r: 0.2, g: 0.1, b: 0.4, a: 1 },
-                    // New line
-                    storeOp: "store"
-                  }]
-                });
-                pass;
+                this.render();
               }
-              async applyColorScale() {
+              updateRenderBindGroup() {
+                if (!this.#uniformGridBuffer) return;
+                this.#bindGroupsRender = [
+                  this.#device.createBindGroup({
+                    label: "renderer bind group A " + this.#texurl,
+                    layout: this.#bindGroupLayoutRender,
+                    entries: [{
+                      binding: 0,
+                      resource: { buffer: this.#uniformGridBuffer }
+                    }, {
+                      binding: 1,
+                      resource: { buffer: this.#cellStateStorage[0] }
+                    }, {
+                      binding: 2,
+                      resource: { buffer: this.#uniformAdjustBuffer }
+                    }, {
+                      binding: 3,
+                      resource: this.#texture.createView()
+                    }, {
+                      binding: 4,
+                      resource: this.#sampler
+                    }]
+                  }),
+                  this.#device.createBindGroup({
+                    label: "renderer bind group B " + this.#texurl,
+                    layout: this.#bindGroupLayoutRender,
+                    entries: [{
+                      binding: 0,
+                      resource: { buffer: this.#uniformGridBuffer }
+                    }, {
+                      binding: 1,
+                      resource: { buffer: this.#cellStateStorage[1] }
+                    }, {
+                      binding: 2,
+                      resource: { buffer: this.#uniformAdjustBuffer }
+                    }, {
+                      binding: 3,
+                      resource: this.#texture.createView()
+                    }, {
+                      binding: 4,
+                      resource: this.#sampler
+                    }]
+                  })
+                ];
+              }
+              updateDataBindGroup() {
+                if (!this.#uniformGridBuffer) return;
+                this.#bindGroupsData = [
+                  this.#device.createBindGroup({
+                    label: "data processing bind group A ",
+                    layout: this.#bindGroupLayoutData,
+                    entries: [{
+                      binding: 0,
+                      resource: { buffer: this.#uniformGridBuffer }
+                    }, {
+                      binding: 1,
+                      resource: { buffer: this.#cellStateStorage[0] }
+                    }, {
+                      binding: 2,
+                      resource: { buffer: this.#cellStateStorage[1] }
+                    }, {
+                      binding: 3,
+                      resource: { buffer: this.#uniformBlurBuffer }
+                    }]
+                  }),
+                  this.#device.createBindGroup({
+                    label: "data processing bind group B ",
+                    layout: this.#bindGroupLayoutData,
+                    entries: [{
+                      binding: 0,
+                      resource: { buffer: this.#uniformGridBuffer }
+                    }, {
+                      binding: 1,
+                      resource: { buffer: this.#cellStateStorage[1] }
+                    }, {
+                      binding: 2,
+                      resource: { buffer: this.#cellStateStorage[0] }
+                    }, {
+                      binding: 3,
+                      resource: { buffer: this.#uniformBlurBuffer }
+                    }]
+                  })
+                ];
               }
               async applyBlur() {
                 this.#gk = DensityMaps.makeGaussKernel(this.params.radius);
-                this.init();
+                this.reset();
+                const uniformBlurArray = new Float32Array(this.#gk);
+                this.#uniformBlurBuffer = this.#device.createBuffer({
+                  label: "Blur Uniforms",
+                  size: uniformBlurArray.byteLength,
+                  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+                });
+                this.#device.queue.writeBuffer(this.#uniformBlurBuffer, 0, uniformBlurArray);
+                this.updateDataBindGroup();
                 this.#pipelines = [];
                 if (this.params.blurtype == "h")
                   this.#pipelines = [this.#hBlurPipeline];
@@ -6357,7 +6495,7 @@ var require_densityMaps = __commonJS({
                 for (let pipeline of this.#pipelines) {
                   const computePass = encoder.beginComputePass();
                   computePass.setPipeline(pipeline);
-                  computePass.setBindGroup(0, this.#bindGroups[this.#step % 2]);
+                  computePass.setBindGroup(0, this.#bindGroupsData[this.#step % 2]);
                   const workgroupCountX = Math.ceil(this.#GRID_SIZE_X / this.#WORKGROUP_SIZE);
                   const workgroupCountY = Math.ceil(this.#GRID_SIZE_X / this.#WORKGROUP_SIZE);
                   computePass.dispatchWorkgroups(workgroupCountX, workgroupCountY);
@@ -6368,7 +6506,7 @@ var require_densityMaps = __commonJS({
                 this.render();
               }
               render() {
-                if (!this.#device) return;
+                if (!this.#device || !this.#device.queue || !this.#uniformAdjustBuffer) return;
                 const uniformAdjustArray = new Float32Array([this.params.mi, this.params.mi + this.params.ma, 1e-4]);
                 this.#device.queue.writeBuffer(this.#uniformAdjustBuffer, 0, uniformAdjustArray);
                 const encoder = this.#device.createCommandEncoder();
@@ -6380,8 +6518,8 @@ var require_densityMaps = __commonJS({
                     storeOp: "store"
                   }]
                 });
-                pass.setPipeline(this.#cellPipeline);
-                pass.setBindGroup(0, this.#bindGroups[this.#step % 2]);
+                pass.setPipeline(this.#renderPipeline);
+                pass.setBindGroup(0, this.#bindGroupsRender[this.#step % 2]);
                 pass.setVertexBuffer(0, this.#vertexBuffer);
                 pass.draw(this.#vertices.length / 2, this.#GRID_SIZE_X * this.#GRID_SIZE_Y);
                 pass.end();

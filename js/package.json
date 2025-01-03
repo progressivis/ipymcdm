@@ -28,5 +28,6 @@
   },
   "jshintConfig": {
     "esversion": 8
-  }
+  },
+  "localdep": "file:../../DensityMaps"
 }
