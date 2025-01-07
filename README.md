@@ -1,35 +1,13 @@
 # ipymcdm
 
+Jupyter Lab widget around the https://github.com/fredvernier/DensityMaps project that uses webGPU to implement the Multiclass Density Map visualizations.
+See also https://github.com/e-/Multiclass-Density-Maps for the original (slow) implementation.
+
 ## Installation
 
-```sh
-pip install ipymcdm
-```
-
-or with [uv](https://github.com/astral-sh/uv):
+Clone the github project locally and install it with:
 
 ```sh
-uv add ipymcdm
+pip install -e .
 ```
 
-## Development
-
-We recommend using [uv](https://github.com/astral-sh/uv) for development.
-It will automatically manage virtual environments and dependencies for you.
-
-```sh
-uv run jupyter lab example.ipynb
-```
-
-Alternatively, create and manage your own virtual environment:
-
-```sh
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-jupyter lab example.ipynb
-```
-
-Open `example.ipynb` in JupyterLab, VS Code, or your favorite editor
-to start developing. Changes made in `src/ipymcdm/static/` will be reflected
-in the notebook.
